@@ -1,0 +1,166 @@
+
+var appid = ''
+var desc = ''
+
+// 读取appid
+var fs = require("fs")
+var data
+
+// 执行bat
+var cp = require("child_process")
+
+// 获取指令参数
+var argv = process.argv;
+console.log("argv", argv)
+if (argv[2]) {
+	var site = argv[2]
+	// 获取修改配置
+	data_setting = fs.readFileSync(`./zz_package/ci/${site}.setting.txt`)
+	setting = JSON.parse(data_setting.toString())
+	console.log("setting：", setting)
+
+	// 获取密钥key
+	data_key = fs.readFileSync(`./zz_package/ci/${site}.key.txt`)
+	key_str = data_key.toString()
+	//console.log("key：", key_str)
+
+	// 获取project.config.json内容
+	data_project = fs.readFileSync(`./project.config.json`)
+	project_obj = JSON.parse(data_project.toString())
+	project_obj.appid = setting.appid
+
+	// 获取env内容
+	data_env = fs.readFileSync(`./comFunc/env.js.tmpl.txt`)
+	env_txt = data_env.toString()
+	env_txt = env_txt.replace(/--comp_id--/g, setting.compid)
+	env_txt = env_txt.replace(/--host--/g, setting.host)
+	env_txt = env_txt.replace(/--oauth--/g, setting.oauth)
+	//console.log("env_txt：", env_txt)
+
+	// 获取app.json内容
+	data_app = fs.readFileSync(`./app.json`)
+	app_txt = JSON.parse(data_app.toString())
+	// app_txt.tabBar.list
+	app_res = []
+	if (setting.tabbar && setting.tabbar.length > 0) {
+		setting.tabbar.forEach((item, index) => {
+			app_res.push({ pagePath: item })
+		})
+	} else {
+		app_res = [{ pagePath: 'pages/index/index' },
+		{ pagePath: 'pages/index/find' },
+		{ pagePath: 'pages/User/user' },
+		{ pagePath: 'pages/index/service' }]
+	}
+	app_txt.tabBar.list = app_res
+	if(site == 'qxzs')
+	{
+	app_txt.plugins['mini-shop-plugin'] = (JSON.parse('{\"version\":\"1.1.9\",\"provider\":\"wx34345ae5855f892d\"}'))
+	}
+	else
+	{
+	delete app_txt.plugins['mini-shop-plugin']
+	}
+
+	// 获取app.wxss内容（换底部栏高）
+	app_wxss = fs.readFileSync(`./app.wxss`)
+	appwxss_txt = app_wxss.toString()
+	var appwxss_ex = appwxss_txt
+	if (setting.tabbar_height) {
+		appwxss_ex = appwxss_txt.replace(/--tabbar-height:.*?;/, "--tabbar-height:" + setting.tabbar_height + ";")
+	} else {
+		appwxss_ex = appwxss_txt.replace(/--tabbar-height:.*?;/, "--tabbar-height:98rpx;")
+	}
+
+	// 替换dzindex.json、tab_00.json
+	dz_expath = ""
+	tab_expath = ""
+	now_site_dir = ""
+	dz_found = false //是否有对应站点的定制文件夹
+	dz_dir = fs.readdirSync(`./zz_dz`)
+	dz_dir.forEach((item, index) => {
+		if (item.indexOf(setting.compid) != -1) {
+			now_site_dir = item
+			dz_expath = `/zz_dz/${item}/dzindex/dzindex`
+			tab_expath = `../../${item}/tab_00/tab_00`
+			dz_found = true
+			return
+		}
+	})
+	data_tabjson = fs.readFileSync(`./zz_dz/abc/tab_00/tab_00.json`)
+	tabjson_txt = JSON.parse(data_tabjson.toString())
+	if (!dz_found) {
+		// delete dzjson_txt.usingComponents.dzindex
+		delete tabjson_txt.usingComponents.abc_00
+	} else {
+		fs.exists(`./zz_dz/${now_site_dir}/__root__`, function (exists) {
+			console.log(exists ? "__root__存在" : "__root__不存在");
+			if (exists) {
+				// 读取替换dzindex.json引用路径
+				data_dzjson = fs.readFileSync(`./zz_dz/${now_site_dir}/__root__/pages/dingzhi/dzindex.json`)
+				dzjson_txt = JSON.parse(data_dzjson.toString())
+				dzjson_txt.usingComponents.dzindex = dz_expath
+				fs.writeFileSync(`./zz_dz/${now_site_dir}/__root__/pages/dingzhi/dzindex.json`, JSON.stringify(dzjson_txt, null, 2), 'utf8', (err) => {
+					if (err) throw err;
+					console.log('dzindex.json DONE');
+				});
+			}
+		});
+
+		// 替换tab_00.json
+		if (setting.tab_00) {
+			tab_expath = tab_expath.replace(/tab_00/g, setting.tab_00)
+			tabjson_txt.usingComponents.tab_00 = tab_expath
+		} else {
+			delete tabjson_txt.usingComponents.abc_00
+		}
+	}
+
+	// 运行bat搬运、覆盖root
+	cp.execFile("ci.0.copy.bat", [now_site_dir], function (err, stdout, stderr) {
+console.warn('-----');
+console.warn('-----');
+console.warn('-----');
+		if (err) {
+			console.error(err);
+		}
+		console.log("stdout:", stdout)
+		console.log("stderr:", stderr);
+	});
+
+	console.warn('-----');
+	console.warn('-----');
+	console.warn('-----');
+
+	// 替换project.config.json
+	fs.writeFile('./project.config.json', JSON.stringify(project_obj, null, 2), 'utf8', (err) => {
+		if (err) throw err;
+		console.log('project.config.json DONE');
+	});
+	// 替换env
+	fs.writeFile('./comFunc/env.js', env_txt, 'utf8', (err) => {
+		if (err) throw err;
+		console.log('env.js DONE');
+	});
+	// 替换key
+	fs.writeFile('./ci.key.txt', key_str, 'utf8', (err) => {
+		if (err) throw err;
+		console.log('ci.key.txt DONE');
+	});
+	// 替换tab_00.json
+	fs.writeFile('./zz_dz/abc/tab_00/tab_00.json', JSON.stringify(tabjson_txt, null, 2), 'utf8', (err) => {
+		if (err) throw err;
+		console.log('tab_00.json DONE');
+	});
+	// 替换app.json
+	fs.writeFile('./app.json', JSON.stringify(app_txt, null, 2), 'utf8', (err) => {
+		if (err) throw err;
+		console.log('app.json DONE');
+	});
+	// 替换app.wxss
+	fs.writeFile('./app.wxss', appwxss_ex, 'utf8', (err) => {
+		if (err) throw err;
+		console.log('app.wxss DONE');
+	});
+}
+
